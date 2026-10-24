@@ -1,4 +1,6 @@
 #include "lanedet/SimpleLaneDetector.hpp"
+#include "lanedet/Threshold.hpp"
+#include "lanedet/Perspective.hpp"
 
 #include <opencv2/opencv.hpp>
 
@@ -18,7 +20,9 @@ void printUsage(const char* exe) {
         << "Lane detection - Phase A (Canny + ROI + HoughLinesP)\n\n"
         << "Usage:\n"
         << "  " << exe << " image <input> [output] [--show] [--stages]\n"
-        << "  " << exe << " video <input> [output] [--show]\n\n"
+        << "  " << exe << " video <input> [output] [--show]\n"
+        << "  " << exe << " binary <input> [output] [--stages]\n"
+        << "  " << exe << " warp <input> [--binary]\n\n"
         << "Options:\n"
         << "  --show     display the result in a window (ESC to close)\n"
         << "  --stages   (image only) also save gray/edges/roi/hough images\n\n"
@@ -163,6 +167,86 @@ int runVideo(const std::vector<std::string>& args) {
     return 0;
 }
 
+// Phase B, step 1: write out the binary lane mask so we can inspect and tune it.
+int runBinary(const std::vector<std::string>& args) {
+    const std::string input = positional(args, 1);
+    if (input.empty()) {
+        std::cerr << "error: missing input image path\n";
+        return 2;
+    }
+
+    cv::Mat frame = cv::imread(input);
+    if (frame.empty()) {
+        std::cerr << "error: could not read image '" << input << "'\n";
+        return 1;
+    }
+
+    std::string output = positional(args, 2);
+    if (output.empty()) {
+        fs::create_directories("output_images");
+        output = "output_images/" + fs::path(input).stem().string() +
+                 "_binary.jpg";
+    }
+
+    lanedet::ThresholdMasks masks = lanedet::buildBinaryMasks(frame);
+    if (!cv::imwrite(output, masks.combined)) {
+        std::cerr << "error: could not write '" << output << "'\n";
+        return 1;
+    }
+    std::cout << "wrote " << output << "\n";
+
+    if (hasFlag(args, "--stages")) {
+        const std::string stem = fs::path(input).stem().string();
+        const std::string dir = "output_images/";
+        cv::imwrite(dir + stem + "_b_white.jpg", masks.white);
+        cv::imwrite(dir + stem + "_b_yellow.jpg", masks.yellow);
+        cv::imwrite(dir + stem + "_b_gradient.jpg", masks.gradient);
+        std::cout << "wrote binary sub-masks to " << dir << "\n";
+    }
+    return 0;
+}
+
+// Phase B, step 2: show the bird's-eye warp and the source trapezoid, so we can
+// check that straight lanes come out vertical and parallel.
+int runWarp(const std::vector<std::string>& args) {
+    const std::string input = positional(args, 1);
+    if (input.empty()) {
+        std::cerr << "error: missing input image path\n";
+        return 2;
+    }
+
+    cv::Mat frame = cv::imread(input);
+    if (frame.empty()) {
+        std::cerr << "error: could not read image '" << input << "'\n";
+        return 1;
+    }
+
+    fs::create_directories("output_images");
+    const std::string dir = "output_images/";
+    const std::string stem = fs::path(input).stem().string();
+
+    lanedet::Perspective perspective(frame.size());
+
+    cv::Mat overlay = frame.clone();
+    std::vector<cv::Point> trapezoid;
+    for (const cv::Point2f& p : perspective.source()) {
+        trapezoid.emplace_back(cvRound(p.x), cvRound(p.y));
+    }
+    cv::polylines(overlay, trapezoid, true, cv::Scalar(0, 0, 255), 2,
+                  cv::LINE_AA);
+    cv::imwrite(dir + stem + "_src.jpg", overlay);
+
+    cv::imwrite(dir + stem + "_warp.jpg", perspective.warp(frame));
+
+    if (hasFlag(args, "--binary")) {
+        cv::Mat warpedBinary = perspective.warp(lanedet::buildBinary(frame));
+        cv::imwrite(dir + stem + "_warp_binary.jpg", warpedBinary);
+    }
+
+    std::cout << "wrote warp output to " << dir << "\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -179,6 +263,12 @@ int main(int argc, char** argv) {
     }
     if (mode == "video") {
         return runVideo(args);
+    }
+    if (mode == "binary") {
+        return runBinary(args);
+    }
+    if (mode == "warp") {
+        return runWarp(args);
     }
 
     std::cerr << "error: unknown mode '" << mode << "'\n\n";

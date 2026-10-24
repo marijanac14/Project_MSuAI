@@ -19,6 +19,8 @@ message(STATUS "OpenCV version: ${OpenCV_VERSION}")
 add_executable(lane_detector
   src/main.cpp
   src/SimpleLaneDetector.cpp
+  src/Threshold.cpp
+  src/Perspective.cpp
 )
 
 target_include_directories(lane_detector PRIVATE
