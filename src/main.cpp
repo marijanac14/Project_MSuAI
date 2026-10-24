@@ -1,6 +1,8 @@
 #include "lanedet/SimpleLaneDetector.hpp"
 #include "lanedet/Threshold.hpp"
 #include "lanedet/Perspective.hpp"
+#include "lanedet/LaneFit.hpp"
+#include "lanedet/AdvancedLaneDetector.hpp"
 
 #include <opencv2/opencv.hpp>
 
@@ -10,6 +12,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+using lanedet::AdvancedLaneDetector;
 using lanedet::SimpleLaneDetector;
 using lanedet::SimpleStages;
 
@@ -20,9 +23,11 @@ void printUsage(const char* exe) {
         << "Lane detection - Phase A (Canny + ROI + HoughLinesP)\n\n"
         << "Usage:\n"
         << "  " << exe << " image <input> [output] [--show] [--stages]\n"
-        << "  " << exe << " video <input> [output] [--show]\n"
+        << "  " << exe << " video <input> [output] [--show] [--advanced]\n"
         << "  " << exe << " binary <input> [output] [--stages]\n"
-        << "  " << exe << " warp <input> [--binary]\n\n"
+        << "  " << exe << " warp <input> [--binary]\n"
+        << "  " << exe << " fit <input>\n"
+        << "  " << exe << " advanced <input> [output] [--show]\n\n"
         << "Options:\n"
         << "  --show     display the result in a window (ESC to close)\n"
         << "  --stages   (image only) also save gray/edges/roi/hough images\n\n"
@@ -141,13 +146,16 @@ int runVideo(const std::vector<std::string>& args) {
     }
 
     const bool show = hasFlag(args, "--show");
-    SimpleLaneDetector detector;
+    const bool advanced = hasFlag(args, "--advanced");
+    SimpleLaneDetector simpleDetector;
+    AdvancedLaneDetector advancedDetector;
     cv::Mat frame;
     long long frameCount = 0;
 
     // Main loop: read, process and write one frame at a time.
     while (cap.read(frame)) {
-        cv::Mat result = detector.process(frame);
+        cv::Mat result = advanced ? advancedDetector.process(frame)
+                                  : simpleDetector.process(frame);
         writer.write(result);
         ++frameCount;
 
@@ -247,6 +255,73 @@ int runWarp(const std::vector<std::string>& args) {
     return 0;
 }
 
+// Phase B, step 3: slide windows over the warped binary, fit a polynomial per
+// side, and save the visualization.
+int runFit(const std::vector<std::string>& args) {
+    const std::string input = positional(args, 1);
+    if (input.empty()) {
+        std::cerr << "error: missing input image path\n";
+        return 2;
+    }
+
+    cv::Mat frame = cv::imread(input);
+    if (frame.empty()) {
+        std::cerr << "error: could not read image '" << input << "'\n";
+        return 1;
+    }
+
+    lanedet::Perspective perspective(frame.size());
+    cv::Mat warped = perspective.warp(lanedet::buildBinary(frame));
+    lanedet::LaneFitResult fit = lanedet::fitLanes(warped);
+
+    fs::create_directories("output_images");
+    const std::string output = "output_images/" +
+                               fs::path(input).stem().string() + "_fit.jpg";
+    cv::imwrite(output, fit.visualization);
+    std::cout << "wrote " << output
+              << (fit.left.valid && fit.right.valid ? "  (both lanes fitted)"
+                                                    : "  (a lane was missing)")
+              << "\n";
+    return 0;
+}
+
+// Phase B, full pipeline: lane drawn back onto the road with curvature/offset.
+int runAdvanced(const std::vector<std::string>& args) {
+    const std::string input = positional(args, 1);
+    if (input.empty()) {
+        std::cerr << "error: missing input image path\n";
+        return 2;
+    }
+
+    cv::Mat frame = cv::imread(input);
+    if (frame.empty()) {
+        std::cerr << "error: could not read image '" << input << "'\n";
+        return 1;
+    }
+
+    std::string output = positional(args, 2);
+    if (output.empty()) {
+        fs::create_directories("output_images");
+        output = "output_images/" + fs::path(input).stem().string() +
+                 "_advanced.jpg";
+    }
+
+    AdvancedLaneDetector detector;
+    cv::Mat result = detector.process(frame);
+    if (!cv::imwrite(output, result)) {
+        std::cerr << "error: could not write '" << output << "'\n";
+        return 1;
+    }
+    std::cout << "wrote " << output << "\n";
+
+    if (hasFlag(args, "--show")) {
+        cv::imshow("Advanced lane detection", result);
+        cv::waitKey(0);
+        cv::destroyAllWindows();
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -269,6 +344,12 @@ int main(int argc, char** argv) {
     }
     if (mode == "warp") {
         return runWarp(args);
+    }
+    if (mode == "fit") {
+        return runFit(args);
+    }
+    if (mode == "advanced") {
+        return runAdvanced(args);
     }
 
     std::cerr << "error: unknown mode '" << mode << "'\n\n";

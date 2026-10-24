@@ -11,7 +11,6 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # OpenCV
-# Provided by the system package `libopencv-dev` (OpenCV 4.x).
 find_package(OpenCV REQUIRED)
 message(STATUS "OpenCV version: ${OpenCV_VERSION}")
 
@@ -21,6 +20,8 @@ add_executable(lane_detector
   src/SimpleLaneDetector.cpp
   src/Threshold.cpp
   src/Perspective.cpp
+  src/LaneFit.cpp
+  src/AdvancedLaneDetector.cpp
 )
 
 target_include_directories(lane_detector PRIVATE
