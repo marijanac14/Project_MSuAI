@@ -20,6 +20,13 @@ struct SlidingWindowParams {
     int windowCount = 9;
     int margin = 100;    // half width of each search window, in pixels
     int minPixels = 50;  // pixels needed before a window recenters
+
+    // Optional base priors. If >= 0 the search starts near the hint instead of
+    // taking the global histogram peak, so on video each line stays locked to
+    // the same marking rather than jumping to an adjacent lane.
+    int leftBaseHint = -1;
+    int rightBaseHint = -1;
+    int baseSearchMargin = 150;
 };
 
 struct LaneFitResult {

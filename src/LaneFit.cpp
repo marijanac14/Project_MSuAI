@@ -1,5 +1,6 @@
 #include "lanedet/LaneFit.hpp"
 
+#include <algorithm>
 #include <vector>
 
 namespace lanedet {
@@ -67,8 +68,20 @@ LaneFitResult fitLanes(const cv::Mat& warpedBinary,
     cv::Mat bottom = binary(cv::Range(h / 2, h), cv::Range::all());
     cv::Mat histogram;
     cv::reduce(bottom, histogram, 0, cv::REDUCE_SUM, CV_32S);
-    int leftX = columnPeak(histogram, 0, w / 2);
-    int rightX = columnPeak(histogram, w / 2, w);
+    int leftX = params.leftBaseHint >= 0
+                    ? columnPeak(histogram,
+                                 std::max(0, params.leftBaseHint -
+                                                 params.baseSearchMargin),
+                                 std::min(w, params.leftBaseHint +
+                                                 params.baseSearchMargin))
+                    : columnPeak(histogram, 0, w / 2);
+    int rightX = params.rightBaseHint >= 0
+                     ? columnPeak(histogram,
+                                  std::max(0, params.rightBaseHint -
+                                                  params.baseSearchMargin),
+                                  std::min(w, params.rightBaseHint +
+                                                  params.baseSearchMargin))
+                     : columnPeak(histogram, w / 2, w);
 
     std::vector<cv::Point> nonzero;
     cv::findNonZero(binary, nonzero);
